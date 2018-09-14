@@ -8,7 +8,7 @@ RUN echo "#!/bin/sh\nexit 0" > /usr/sbin/policy-rc.d && \
     apt-get -yq install wget apt-transport-https curl locales && \
     apt-key adv --keyserver keyserver.ubuntu.com --recv-keys 0x8320ca65cb2de8e5 && \
     locale-gen en_US.UTF-8 && \
-    curl -sL https://deb.nodesource.com/setup_8.x | bash - && \
+    curl -sL https://deb.nodesource.com/setup_6.x | bash - && \
     apt-get -y update && \
     apt-get -yq install \
         adduser \
@@ -52,24 +52,27 @@ RUN echo "#!/bin/sh\nexit 0" > /usr/sbin/policy-rc.d && \
     service nginx stop && \
     rm -rf /var/lib/apt/lists/*
 
-COPY config /app/onlyoffice/setup/config/
-COPY run-document-server.sh /app/onlyoffice/run-document-server.sh
+COPY app_onlyoffice /app/onlyoffice/
 
 EXPOSE 80 443
 
 ARG REPO_URL="deb http://download.onlyoffice.com/repo/debian squeeze main"
-ARG PRODUCT_NAME=onlyoffice-documentserver
 
 RUN echo "$REPO_URL" | tee /etc/apt/sources.list.d/onlyoffice.list && \
     apt-get -y update && \
     service postgresql start && \
-    apt-get -yq install $PRODUCT_NAME && \
+    dpkg -i /app/onlyoffice/onlyoffice-documentserver_amd64.deb && \
     service postgresql stop && \
     service supervisor stop && \
     chmod 755 /app/onlyoffice/*.sh && \
     rm -rf /var/log/onlyoffice && \
-    rm -rf /var/lib/apt/lists/*
+    rm -rf /var/lib/apt/lists/* && \
+    find /var/www/onlyoffice/documentserver/sdkjs-plugins/* -maxdepth 0 -type d -exec rm -rf '{}' \; && \
+    cp -fpR /app/onlyoffice/documentserver/* /var/www/onlyoffice/documentserver/ && \
+    chown -R onlyoffice:onlyoffice /var/www/onlyoffice/documentserver && \
+    rm /app/onlyoffice/onlyoffice-documentserver_amd64.deb && \
+    rm -Rf /app/onlyoffice/documentserver
 
 VOLUME /etc/onlyoffice /var/log/onlyoffice /var/lib/onlyoffice /var/www/onlyoffice/Data /var/lib/postgresql /usr/share/fonts/truetype/custom
 
-ENTRYPOINT /app/onlyoffice/run-document-server.sh
+CMD bash -C '/app/onlyoffice/run-document-server.sh';'bash'

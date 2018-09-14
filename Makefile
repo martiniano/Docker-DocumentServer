@@ -1,12 +1,21 @@
-COMPANY_NAME ?= onlyoffice
+COMPANY_NAME ?= gcr.io/nuclearis-168517
 GIT_BRANCH ?= origin/develop
-PRODUCT_NAME ?= documentserver-ie
-PRODUCT_VERSION ?= 0.0.0
-BUILD_NUMBER ?= 0
+PRODUCT_NAME ?= onlyoffice-prod
+PRODUCT_VERSION ?= 5.1.3
+BUILD_NUMBER ?= 38
+
+# File where to store auto increments                                          
+BUILDER_FILE ?= .build_version
+
+# Initiate BUILDER_FILE if not exists                                              
+BUILDER_VERSION_CREATE := $(shell if ! test -f $(BUILDER_FILE); then echo 0 > $(BUILDER_FILE); fi)
+
+# Prepare callable function. This function updates BUILDER_FILE
+BUILDER_VERSION = $(shell echo $$(($$(cat $(BUILDER_FILE)) + 1)) > $(BUILDER_FILE))
+
+BUILD_NUMBER = $(shell cat $(BUILDER_FILE))
 
 PACKAGE_VERSION := $(PRODUCT_VERSION)-$(BUILD_NUMBER)
-
-REPO_URL := "deb [trusted=yes] http://repo-doc-onlyoffice-com.s3.amazonaws.com/ubuntu/trusty/$(COMPANY_NAME)-$(PRODUCT_NAME)/$(GIT_BRANCH)/$(PACKAGE_VERSION)/ repo/"
 
 UPDATE_LATEST := false
 
@@ -21,26 +30,34 @@ else
 DOCKER_TAGS += $(subst -,.,$(PACKAGE_VERSION))-$(subst /,-,$(GIT_BRANCH))
 endif
 
-DOCKER_REPO = $(COMPANY_NAME)/4testing-$(PRODUCT_NAME)
+DOCKER_REPO = $(COMPANY_NAME)/$(PRODUCT_NAME)
 
-COLON := __colon__
+COLON := \:
 DOCKER_TARGETS := $(foreach TAG,$(DOCKER_TAGS),$(DOCKER_REPO)$(COLON)$(TAG))
 
 .PHONY: all clean clean-docker deploy docker
 
 $(DOCKER_TARGETS): $(DEB_REPO_DATA)
-
-	sudo docker build --build-arg REPO_URL=$(REPO_URL) --build-arg PRODUCT_NAME=$(COMPANY_NAME)-$(PRODUCT_NAME) -t $(subst $(COLON),:,$@) . &&\
+	#@echo $(BUILD_NUMBER)
+	mkdir -p app_onlyoffice/documentserver
+	mkdir -p app_onlyoffice/documentserver/server
+	cp -fpR ../sdkjs/deploy/web-apps/sdkjs app_onlyoffice/documentserver/
+	cp -fpR ../sdkjs/deploy/web-apps/web-apps app_onlyoffice/documentserver/
+	cp -fpR ../SpellChecker app_onlyoffice/documentserver/server/
+	cp -fpR ../../core/Modulos/nuclearis-web/src/main/webapp/resources/js/onlyoffice/sdkjs-plugins app_onlyoffice/documentserver/
+	docker build -t $(subst $(COLON),:,$@) . &&\
 	mkdir -p $$(dirname $@) &&\
 	echo "Done" > $@
+	$(call BUILDER_VERSION)
 
 all: $(DOCKER_TARGETS)
 
 clean:
+	rm -Rf app_onlyoffice/documentserver
 	rm -rfv $(DOCKER_TARGETS)
 		
 clean-docker:
-	sudo docker rmi -f $$(sudo docker images -q $(COMPANY_NAME)/*) || exit 0
+	docker rmi -f $$(docker images -q $(COMPANY_NAME)/*) || exit 0
 
 deploy: $(DOCKER_TARGETS)
-	$(foreach TARGET,$(DOCKER_TARGETS),sudo docker push $(subst $(COLON),:,$(TARGET));)
+	$(foreach TARGET,$(DOCKER_TARGETS), docker push $(subst $(COLON),:,$(TARGET));)
