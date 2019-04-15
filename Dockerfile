@@ -61,7 +61,7 @@ ARG REPO_URL="deb http://download.onlyoffice.com/repo/debian squeeze main"
 RUN echo "$REPO_URL" | tee /etc/apt/sources.list.d/onlyoffice.list && \
     apt-get -y update && \
     service postgresql start && \
-    dpkg -i /app/onlyoffice/onlyoffice-documentserver_amd64.deb && \
+    dpkg --force-all -i /app/onlyoffice/onlyoffice-documentserver_amd64.deb && \
     service postgresql stop && \
     service supervisor stop && \
     chmod 755 /app/onlyoffice/*.sh && \

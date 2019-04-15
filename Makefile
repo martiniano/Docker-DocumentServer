@@ -1,6 +1,6 @@
 COMPANY_NAME ?= gcr.io/nuclearis-168517
 GIT_BRANCH ?= origin/develop
-PRODUCT_NAME ?= onlyoffice-prod
+PRODUCT_NAME ?= onlyoffice-dev
 PRODUCT_VERSION ?= 5.1.3
 BUILD_NUMBER ?= 38
 
