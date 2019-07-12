@@ -43,7 +43,7 @@ $(DOCKER_TARGETS): $(DEB_REPO_DATA)
 	mkdir -p app_onlyoffice/documentserver/server
 	cp -fpR ../sdkjs/deploy/web-apps/sdkjs app_onlyoffice/documentserver/
 	cp -fpR ../sdkjs/deploy/web-apps/web-apps app_onlyoffice/documentserver/
-	cp -fpR ../SpellChecker app_onlyoffice/documentserver/server/
+	cp -fpR ../SpellChecker-5.1.3.x app_onlyoffice/documentserver/server/
 	cp -fpR ../../core/Modulos/nuclearis-web/src/main/webapp/resources/js/onlyoffice/sdkjs-plugins app_onlyoffice/documentserver/
 	docker build -t $(subst $(COLON),:,$@) . &&\
 	mkdir -p $$(dirname $@) &&\
