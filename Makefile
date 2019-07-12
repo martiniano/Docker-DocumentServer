@@ -1,7 +1,7 @@
 COMPANY_NAME ?= gcr.io/nuclearis-168517
 GIT_BRANCH ?= origin/develop
 PRODUCT_NAME ?= onlyoffice-dev
-PRODUCT_VERSION ?= 5.1.3
+PRODUCT_VERSION ?= 5.3.2
 BUILD_NUMBER ?= 38
 
 # File where to store auto increments                                          
@@ -41,9 +41,9 @@ $(DOCKER_TARGETS): $(DEB_REPO_DATA)
 	#@echo $(BUILD_NUMBER)
 	mkdir -p app_onlyoffice/documentserver
 	mkdir -p app_onlyoffice/documentserver/server
-	cp -fpR ../sdkjs/deploy/web-apps/sdkjs app_onlyoffice/documentserver/
-	cp -fpR ../sdkjs/deploy/web-apps/web-apps app_onlyoffice/documentserver/
-	cp -fpR ../SpellChecker app_onlyoffice/documentserver/server/
+	cp -fpR ../DocumentServer/sdkjs/deploy/web-apps-pro/sdkjs app_onlyoffice/documentserver/
+	cp -fpR ../DocumentServer/sdkjs/deploy/web-apps-pro/web-apps app_onlyoffice/documentserver/
+	cp -fpR ../SpellChecker-5.3.2.x app_onlyoffice/documentserver/server/
 	cp -fpR ../../core/Modulos/nuclearis-web/src/main/webapp/resources/js/onlyoffice/sdkjs-plugins app_onlyoffice/documentserver/
 	docker build -t $(subst $(COLON),:,$@) . &&\
 	mkdir -p $$(dirname $@) &&\

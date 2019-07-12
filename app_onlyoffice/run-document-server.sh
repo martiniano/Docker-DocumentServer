@@ -1,10 +1,14 @@
 #!/bin/bash
 
+# Define '**' behavior explicitly
+shopt -s globstar
+
 APP_DIR="/var/www/onlyoffice/documentserver"
 DATA_DIR="/var/www/onlyoffice/Data"
 LOG_DIR="/var/log/onlyoffice"
 DS_LOG_DIR="${LOG_DIR}/documentserver"
 LIB_DIR="/var/lib/onlyoffice"
+DS_LIB_DIR="${LIB_DIR}/documentserver"
 CONF_DIR="/etc/onlyoffice/documentserver"
 
 ONLYOFFICE_DATA_CONTAINER=${ONLYOFFICE_DATA_CONTAINER:-false}
@@ -22,10 +26,10 @@ ONLYOFFICE_HTTPS_HSTS_MAXAGE=${ONLYOFFICE_HTTPS_HSTS_MAXAGE:-31536000}
 SYSCONF_TEMPLATES_DIR="/app/onlyoffice/setup/config"
 
 NGINX_CONFD_PATH="/etc/nginx/conf.d";
-NGINX_ONLYOFFICE_CONF="${NGINX_CONFD_PATH}/onlyoffice-documentserver.conf"
 NGINX_ONLYOFFICE_PATH="${CONF_DIR}/nginx"
+NGINX_ONLYOFFICE_CONF="${NGINX_ONLYOFFICE_PATH}/ds.conf"
 NGINX_ONLYOFFICE_EXAMPLE_PATH="${CONF_DIR}-example/nginx"
-NGINX_ONLYOFFICE_EXAMPLE_CONF="${NGINX_ONLYOFFICE_EXAMPLE_PATH}/includes/onlyoffice-documentserver-example.conf"
+NGINX_ONLYOFFICE_EXAMPLE_CONF="${NGINX_ONLYOFFICE_EXAMPLE_PATH}/includes/ds-example.conf"
 
 NGINX_CONFIG_PATH="/etc/nginx/nginx.conf"
 NGINX_WORKER_PROCESSES=${NGINX_WORKER_PROCESSES:-1}
@@ -35,39 +39,43 @@ JWT_ENABLED=${JWT_ENABLED:-false}
 JWT_SECRET=${JWT_SECRET:-secret}
 JWT_HEADER=${JWT_HEADER:-Authorization}
 
-ONLYOFFICE_DEFAULT_CONFIG=${CONF_DIR}/default.json
+ONLYOFFICE_DEFAULT_CONFIG=${CONF_DIR}/local.json
 ONLYOFFICE_LOG4JS_CONFIG=${CONF_DIR}/log4js/production.json
-ONLYOFFICE_EXAMPLE_CONFIG=${CONF_DIR}-example/default.json
+ONLYOFFICE_EXAMPLE_CONFIG=${CONF_DIR}-example/local.json
 
-JSON="json -q -f ${ONLYOFFICE_DEFAULT_CONFIG}"
-JSON_LOG="json -q -f ${ONLYOFFICE_LOG4JS_CONFIG}"
-JSON_EXAMPLE="json -q -f ${ONLYOFFICE_EXAMPLE_CONFIG}"
+JSON_BIN=${APP_DIR}/npm/node_modules/.bin/json
+JSON="${JSON_BIN} -q -f ${ONLYOFFICE_DEFAULT_CONFIG}"
+JSON_LOG="${JSON_BIN} -q -f ${ONLYOFFICE_LOG4JS_CONFIG}"
+JSON_EXAMPLE="${JSON_BIN} -q -f ${ONLYOFFICE_EXAMPLE_CONFIG}"
 
 LOCAL_SERVICES=()
 
+PG_ROOT=/var/lib/postgresql
 PG_VERSION=9.5
 PG_NAME=main
-PGDATA=/var/lib/postgresql/${PG_VERSION}/${PG_NAME}
+PGDATA=${PG_ROOT}/${PG_VERSION}/${PG_NAME}
 PG_NEW_CLUSTER=false
 
 read_setting(){
   POSTGRESQL_SERVER_HOST=${POSTGRESQL_SERVER_HOST:-$(${JSON} services.CoAuthoring.sql.dbHost)}
-  POSTGRESQL_SERVER_PORT=${POSTGRESQL_SERVER_PORT:-$(${JSON} services.CoAuthoring.sql.dbPort)}
+  POSTGRESQL_SERVER_PORT=${POSTGRESQL_SERVER_PORT:-5432}
   POSTGRESQL_SERVER_DB_NAME=${POSTGRESQL_SERVER_DB_NAME:-$(${JSON} services.CoAuthoring.sql.dbName)}
   POSTGRESQL_SERVER_USER=${POSTGRESQL_SERVER_USER:-$(${JSON} services.CoAuthoring.sql.dbUser)}
   POSTGRESQL_SERVER_PASS=${POSTGRESQL_SERVER_PASS:-$(${JSON} services.CoAuthoring.sql.dbPass)}
 
   RABBITMQ_SERVER_URL=${RABBITMQ_SERVER_URL:-$(${JSON} rabbitmq.url)}
-  parse_rabbitmq_url
+  AMQP_SERVER_URL=${AMQP_SERVER_URL:-${RABBITMQ_SERVER_URL}}
+  AMQP_SERVER_TYPE=${AMQP_SERVER_TYPE:-rabbitmq}
+  parse_rabbitmq_url ${AMQP_SERVER_URL}
 
   REDIS_SERVER_HOST=${REDIS_SERVER_HOST:-$(${JSON} services.CoAuthoring.redis.host)}
-  REDIS_SERVER_PORT=${REDIS_SERVER_PORT:-$(${JSON} services.CoAuthoring.redis.port)}
+  REDIS_SERVER_PORT=${REDIS_SERVER_PORT:-6379}
 
-  DS_LOG_LEVEL=${DS_LOG_LEVEL:-$(${JSON_LOG} levels.nodeJS)}
+  DS_LOG_LEVEL=${DS_LOG_LEVEL:-$(${JSON_LOG} categories.default.level)}
 }
 
 parse_rabbitmq_url(){
-  local amqp=${RABBITMQ_SERVER_URL}
+  local amqp=$1
 
   # extract the protocol
   local proto="$(echo $amqp | grep :// | sed -e's,^\(.*://\).*,\1,g')"
@@ -101,10 +109,10 @@ parse_rabbitmq_url(){
   # extract the path (if any)
   local path="$(echo $url | grep / | cut -d/ -f2-)"
 
-  RABBITMQ_SERVER_HOST=$host
-  RABBITMQ_SERVER_USER=$user
-  RABBITMQ_SERVER_PASS=$pass
-  RABBITMQ_SERVER_PORT=$port
+  AMQP_SERVER_HOST=$host
+  AMQP_SERVER_USER=$user
+  AMQP_SERVER_PASS=$pass
+  AMQP_SERVER_PORT=$port
 }
 
 waiting_for_connection(){
@@ -118,8 +126,8 @@ waiting_for_postgresql(){
   waiting_for_connection ${POSTGRESQL_SERVER_HOST} ${POSTGRESQL_SERVER_PORT}
 }
 
-waiting_for_rabbitmq(){
-  waiting_for_connection ${RABBITMQ_SERVER_HOST} ${RABBITMQ_SERVER_PORT}
+waiting_for_amqp(){
+  waiting_for_connection ${AMQP_SERVER_HOST} ${AMQP_SERVER_PORT}
 }
 
 waiting_for_redis(){
@@ -137,7 +145,38 @@ update_postgresql_settings(){
 }
 
 update_rabbitmq_setting(){
-  ${JSON} -I -e "this.rabbitmq.url = '${RABBITMQ_SERVER_URL}'"
+  if [ "${AMQP_SERVER_TYPE}" == "rabbitmq" ]; then
+    ${JSON} -I -e "if(this.queue===undefined)this.queue={};"
+    ${JSON} -I -e "this.queue.type = 'rabbitmq'"
+    ${JSON} -I -e "this.rabbitmq.url = '${AMQP_SERVER_URL}'"
+  fi
+  
+  if [ "${AMQP_SERVER_TYPE}" == "activemq" ]; then
+    ${JSON} -I -e "if(this.queue===undefined)this.queue={};"
+    ${JSON} -I -e "this.queue.type = 'activemq'"
+    ${JSON} -I -e "if(this.activemq===undefined)this.activemq={};"
+    ${JSON} -I -e "if(this.activemq.connectOptions===undefined)this.activemq.connectOptions={};"
+
+    ${JSON} -I -e "this.activemq.connectOptions.host = '${AMQP_SERVER_HOST}'"
+
+    if [ ! "${AMQP_SERVER_PORT}" == "" ]; then
+      ${JSON} -I -e "this.activemq.connectOptions.port = '${AMQP_SERVER_PORT}'"
+    else
+      ${JSON} -I -e "delete this.activemq.connectOptions.port"
+    fi
+
+    if [ ! "${AMQP_SERVER_USER}" == "" ]; then
+      ${JSON} -I -e "this.activemq.connectOptions.username = '${AMQP_SERVER_USER}'"
+    else
+      ${JSON} -I -e "delete this.activemq.connectOptions.username"
+    fi
+
+    if [ ! "${AMQP_SERVER_PASS}" == "" ]; then
+      ${JSON} -I -e "this.activemq.connectOptions.password = '${AMQP_SERVER_PASS}'"
+    else
+      ${JSON} -I -e "delete this.activemq.connectOptions.password"
+    fi
+  fi
 }
 
 update_redis_settings(){
@@ -145,15 +184,11 @@ update_redis_settings(){
   ${JSON} -I -e "this.services.CoAuthoring.redis.port = '${REDIS_SERVER_PORT}'"
 }
 
-update_plugins_settings(){
-  ${JSON} -I -e "this.services.CoAuthoring.plugins.autostart = [\"asc.{A8705DEE-7544-4C33-B3D5-168406D92F72}\"]"
-}
-
 update_jwt_settings(){
   if [ "${JWT_ENABLED}" == "true" ]; then
-    ${JSON} -I -e "this.services.CoAuthoring.token.enable.browser = '${JWT_ENABLED}'"
-    ${JSON} -I -e "this.services.CoAuthoring.token.enable.request.inbox = '${JWT_ENABLED}'"
-    ${JSON} -I -e "this.services.CoAuthoring.token.enable.request.outbox = '${JWT_ENABLED}'"
+    ${JSON} -I -e "this.services.CoAuthoring.token.enable.browser = ${JWT_ENABLED}"
+    ${JSON} -I -e "this.services.CoAuthoring.token.enable.request.inbox = ${JWT_ENABLED}"
+    ${JSON} -I -e "this.services.CoAuthoring.token.enable.request.outbox = ${JWT_ENABLED}"
 
     ${JSON} -I -e "this.services.CoAuthoring.secret.inbox.string = '${JWT_SECRET}'"
     ${JSON} -I -e "this.services.CoAuthoring.secret.outbox.string = '${JWT_SECRET}'"
@@ -162,8 +197,8 @@ update_jwt_settings(){
     ${JSON} -I -e "this.services.CoAuthoring.token.inbox.header = '${JWT_HEADER}'"
     ${JSON} -I -e "this.services.CoAuthoring.token.outbox.header = '${JWT_HEADER}'"
 
-    if [ -f "${ONLYOFFICE_EXAMPLE_CONFIG}" ]; then
-      ${JSON_EXAMPLE} -I -e "this.server.token.enable = '${JWT_ENABLED}'"
+    if [ -f "${ONLYOFFICE_EXAMPLE_CONFIG}" ] && [ "${JWT_ENABLED}" == "true" ]; then
+      ${JSON_EXAMPLE} -I -e "this.server.token.enable = ${JWT_ENABLED}"
       ${JSON_EXAMPLE} -I -e "this.server.token.secret = '${JWT_SECRET}'"
       ${JSON_EXAMPLE} -I -e "this.server.token.authorizationHeader = '${JWT_HEADER}'"
     fi
@@ -198,7 +233,7 @@ create_postgresql_tbl(){
 
   # Create db on remote server
   if $PSQL -lt | cut -d\| -f 1 | grep -qw | grep 0; then
-    $CREATEDB $DB_NAME
+    $CREATEDB $POSTGRESQL_SERVER_DB_NAME
   fi
 
   $PSQL -d "${POSTGRESQL_SERVER_DB_NAME}" -f "${APP_DIR}/server/schema/postgresql/createdb.sql"
@@ -212,7 +247,7 @@ update_nginx_settings(){
 
   # setup HTTPS
   if [ -f "${SSL_CERTIFICATE_PATH}" -a -f "${SSL_KEY_PATH}" ]; then
-    ln -sf ${NGINX_ONLYOFFICE_PATH}/onlyoffice-documentserver-ssl.conf.template ${NGINX_ONLYOFFICE_CONF}
+    cp -f ${NGINX_ONLYOFFICE_PATH}/ds-ssl.conf.tmpl ${NGINX_ONLYOFFICE_CONF}
 
     # configure nginx
     sed 's,{{SSL_CERTIFICATE_PATH}},'"${SSL_CERTIFICATE_PATH}"',' -i ${NGINX_ONLYOFFICE_CONF}
@@ -240,7 +275,12 @@ update_nginx_settings(){
       sed '/max-age=/d' -i ${NGINX_ONLYOFFICE_CONF}
     fi
   else
-    ln -sf ${NGINX_ONLYOFFICE_PATH}/onlyoffice-documentserver.conf.template ${NGINX_ONLYOFFICE_CONF}
+    ln -sf ${NGINX_ONLYOFFICE_PATH}/ds.conf.tmpl ${NGINX_ONLYOFFICE_CONF}
+  fi
+
+  # check if ipv6 supported otherwise remove it from nginx config
+  if [ ! -f /proc/net/if_inet6 ]; then
+    sed '/listen\s\+\[::[0-9]*\].\+/d' -i $NGINX_ONLYOFFICE_CONF
   fi
 
   if [ -f "${NGINX_ONLYOFFICE_EXAMPLE_CONF}" ]; then
@@ -256,7 +296,11 @@ update_supervisor_settings(){
 }
 
 update_log_settings(){
-   ${JSON_LOG} -I -e "this.levels.nodeJS = '${DS_LOG_LEVEL}'"
+   ${JSON_LOG} -I -e "this.categories.default.level = '${DS_LOG_LEVEL}'"
+}
+
+update_logrotate_settings(){
+  sed 's|\(^su\b\).*|\1 root root|' -i /etc/logrotate.conf
 }
 
 # create base folders
@@ -266,9 +310,14 @@ done
 
 mkdir -p ${DS_LOG_DIR}-example
 
+# create app folders
+for i in App_Data/cache/files App_Data/docbuilder; do
+  mkdir -p "${DS_LIB_DIR}/$i"
+done
+
 # change folder rights
 for i in ${LOG_DIR} ${LIB_DIR} ${DATA_DIR}; do
-  chown -R onlyoffice:onlyoffice "$i"
+  chown -R ds:ds "$i"
   chmod -R 755 "$i"
 done
 
@@ -280,14 +329,17 @@ if [ ${ONLYOFFICE_DATA_CONTAINER_HOST} = "localhost" ]; then
 
   update_jwt_settings
 
-  update_plugins_settings
-
   # update settings by env variables
   if [ ${POSTGRESQL_SERVER_HOST} != "localhost" ]; then
     update_postgresql_settings
     waiting_for_postgresql
     create_postgresql_tbl
   else
+    # change rights for postgres directory
+    chown -R postgres:postgres ${PG_ROOT}
+    chmod -R 700 ${PG_ROOT}
+
+    # create new db if it isn't exist
     if [ ! -d ${PGDATA} ]; then
       create_postgresql_cluster
       PG_NEW_CLUSTER=true
@@ -295,10 +347,12 @@ if [ ${ONLYOFFICE_DATA_CONTAINER_HOST} = "localhost" ]; then
     LOCAL_SERVICES+=("postgresql")
   fi
 
-  if [ ${RABBITMQ_SERVER_HOST} != "localhost" ]; then
+  if [ ${AMQP_SERVER_HOST} != "localhost" ]; then
     update_rabbitmq_setting
   else
     LOCAL_SERVICES+=("rabbitmq-server")
+    # allow Rabbitmq startup after container kill
+    rm -rf /var/run/rabbitmq
   fi
 
   if [ ${REDIS_SERVER_HOST} != "localhost" ]; then
@@ -327,13 +381,17 @@ fi
 
 if [ ${ONLYOFFICE_DATA_CONTAINER} != "true" ]; then
   waiting_for_postgresql
-  waiting_for_rabbitmq
+  waiting_for_amqp
   waiting_for_redis
 
   update_nginx_settings
 
   update_supervisor_settings
   service supervisor start
+  
+  # start cron to enable log rotating
+  update_logrotate_settings
+  service cron start
 fi
 
 # nginx used as a proxy, and as data container status service.
@@ -342,4 +400,6 @@ service nginx start
 
 # Regenerate the fonts list and the fonts thumbnails
 documentserver-generate-allfonts.sh ${ONLYOFFICE_DATA_CONTAINER}
-# documentserver-static-gzip.sh ${ONLYOFFICE_DATA_CONTAINER}
+documentserver-static-gzip.sh ${ONLYOFFICE_DATA_CONTAINER}
+
+tail -f /var/log/onlyoffice/**/*.log
