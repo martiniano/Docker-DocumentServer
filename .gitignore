@@ -1,3 +1,5 @@
 app_onlyoffice/documentserver
 app_onlyoffice/*.deb
 gcr.io
+441844665614.dkr.ecr.us-east-2.amazonaws.com
+*.pem

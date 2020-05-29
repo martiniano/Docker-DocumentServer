@@ -1,4 +1,4 @@
-COMPANY_NAME ?= gcr.io/nuclearis-168517
+COMPANY_NAME ?= 441844665614.dkr.ecr.us-east-2.amazonaws.com
 GIT_BRANCH ?= origin/develop
 PRODUCT_NAME ?= onlyoffice-prod
 PRODUCT_VERSION ?= 5.1.3
@@ -41,9 +41,11 @@ $(DOCKER_TARGETS): $(DEB_REPO_DATA)
 	#@echo $(BUILD_NUMBER)
 	mkdir -p app_onlyoffice/documentserver
 	mkdir -p app_onlyoffice/documentserver/server
+	mkdir -p app_onlyoffice/certs
 	cp -fpR ../sdkjs/deploy/web-apps/sdkjs app_onlyoffice/documentserver/
 	cp -fpR ../sdkjs/deploy/web-apps/web-apps app_onlyoffice/documentserver/
 	cp -fpR ../SpellChecker-5.1.3.x app_onlyoffice/documentserver/server/
+	cp -fp  ../../aws/certs-nuclearis-com-br/*.pem app_onlyoffice/certs
 	cp -fpR ../../core/Modulos/nuclearis-web/src/main/webapp/resources/js/onlyoffice/sdkjs-plugins app_onlyoffice/documentserver/
 	docker build -t $(subst $(COLON),:,$@) . &&\
 	mkdir -p $$(dirname $@) &&\
@@ -54,6 +56,7 @@ all: $(DOCKER_TARGETS)
 
 clean:
 	rm -Rf app_onlyoffice/documentserver
+	rm -Rf app_onlyoffice/certs
 	rm -rfv $(DOCKER_TARGETS)
 		
 clean-docker:

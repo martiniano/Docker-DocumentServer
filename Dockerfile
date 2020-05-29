@@ -70,10 +70,11 @@ RUN echo "$REPO_URL" | tee /etc/apt/sources.list.d/onlyoffice.list && \
     rm -rf /var/lib/apt/lists/* && \
     find /var/www/onlyoffice/documentserver/sdkjs-plugins/* -maxdepth 0 -type d -exec rm -rf '{}' \; && \
     cp -fpR /app/onlyoffice/documentserver/* /var/www/onlyoffice/documentserver/ && \
-    chown -R onlyoffice:onlyoffice /var/www/onlyoffice/documentserver && \
     rm /app/onlyoffice/onlyoffice-documentserver_amd64.deb && \
-    rm -Rf /app/onlyoffice/documentserver
+    rm -Rf /app/onlyoffice/documentserver && \
+    cp -fpR /app/onlyoffice/fonts/calibri /var/www/onlyoffice/documentserver/core-fonts && \
+    chown -R onlyoffice:onlyoffice /var/www/onlyoffice/documentserver
 
 VOLUME /etc/onlyoffice /var/log/onlyoffice /var/lib/onlyoffice /var/www/onlyoffice/Data /var/lib/postgresql /usr/share/fonts/truetype/custom
 
-CMD bash -C '/app/onlyoffice/run-document-server.sh';'bash'
+ENTRYPOINT /app/onlyoffice/run-document-server.sh
